@@ -1,0 +1,75 @@
+---
+title: "Quarterly pantry report"
+format:
+  html:
+    embed-resources: true
+execute:
+  echo: false
+  message: false
+params:
+  this_q: "FY27 Q1"
+  last_q: "FY26 Q1"
+---
+
+```{r}
+library(tidyverse)
+
+this_q <- params$this_q
+last_q <- params$last_q
+
+visits <- read_rds("data-clean/visits.rds")
+
+# Stop with a clear message if a quarter is mistyped or not in the data yet
+missing_q <- setdiff(c(this_q, last_q), visits$quarter)
+if (length(missing_q) > 0) {
+  stop(
+    "No visits found for ",
+    str_flatten_comma(missing_q),
+    ". Check the this_q and last_q parameters."
+  )
+}
+
+pct_change <- function(new, old) {
+  scales::percent((new - old) / old, accuracy = 1)
+}
+
+report_visits <- visits |>
+  filter(quarter %in% c(this_q, last_q))
+
+totals <- report_visits |>
+  summarize(
+    households = n_distinct(hh_id),
+    visits = n(),
+    people = sum(hh_size),
+    .by = quarter
+  )
+
+now <- filter(totals, quarter == this_q)
+before <- filter(totals, quarter == last_q)
+```
+
+## `r this_q`
+
+Our pantries served **`r scales::comma(now$households)` households** this quarter, compared with `r scales::comma(before$households)` in `r last_q`. That's `r scales::comma(now$visits)` visits and `r scales::comma(now$people)` people served.
+
+## By site
+
+```{r}
+this_hh <- str_c(this_q, " households")
+last_hh <- str_c(last_q, " households")
+
+report_visits |>
+  summarize(
+    "{this_hh}" := n_distinct(hh_id[quarter == this_q]),
+    "{last_hh}" := n_distinct(hh_id[quarter == last_q]),
+    "{this_q} visits" := sum(quarter == this_q),
+    .by = site_name
+  ) |>
+  mutate(
+    Change = pct_change(.data[[this_hh]], .data[[last_hh]]),
+    .after = all_of(last_hh)
+  ) |>
+  arrange(desc(.data[[this_hh]])) |>
+  rename(Site = site_name) |>
+  knitr::kable(format.args = list(big.mark = ","))
+```
